@@ -1,214 +1,111 @@
-<a href="https://trendshift.io/repositories/9828" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9828" alt="dnhkng%2FGlaDOS | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+# GLaDOS — Local Personality Core
 
-# GLaDOS Personality Core
-This is a project dedicated to building a real-life version of GLaDOS!
+GLaDOS is a local voice assistant orchestrator that combines voice activity detection (VAD), automatic speech recognition (ASR), streaming language model responses (LLM), and text-to-speech (TTS) into a low-latency interactive assistant.
 
-NEW: If you want to chat or join the community, [Join our discord!](https://discord.com/invite/ERTDKwpjNB) If you want to support, [sponsor the project here!](https://ko-fi.com/dnhkng)
+This README is based on the project's source code (CLI, TUI, core engine and API).
 
-https://github.com/user-attachments/assets/c22049e4-7fba-4e84-8667-2c6657a656a0
+## Quick facts
+- Python: requires Python >= 3.12 (see `pyproject.toml`).
+- CLI entry point: `glados` (installed by the package; implementation in `src/glados/cli.py`).
+- Main commands: `download`, `start`, `tui`, `say`.
 
-## Update 3-1-2025 *Got GLaDOS running on an 8Gb SBC!*
+## Install (development / local)
+1. Create and activate a virtualenv (example PowerShell):
 
-https://github.com/user-attachments/assets/99e599bb-4701-438a-a311-8e6cd595796c
+   python -m venv .venv; .\\.venv\\Scripts\\Activate.ps1
 
-This is really tricky, so only for hardcore geeks! Checkout the 'rock5b' branch, and my OpenAI API for the [RK3588 NPU system](https://github.com/dnhkng/RKLLM-Gradio)
-Don't expect support for this, it's in active development, and requires lots of messing about in armbian linux etc.
+2. Install the package (editable) and developer extras:
 
-## Goals
-*This is a hardware and software project that will create an aware, interactive, and embodied GLaDOS.*
+   pip install -e .[dev]
 
-This will entail:
-- [x] Train GLaDOS voice generator
-- [x] Generate a prompt that leads to a realistic "Personality Core"
-- [ ] Generate a medium- and long-term memory for GLaDOS (Probably a custom vector DB in a simpy Numpy array!) 
-- [ ] Give GLaDOS vision via a VLM (either a full VLM for everything, or a 'vision module' using a tiny VLM the GLaDOS can function call!)
-- [ ] Create 3D-printable parts
-- [ ] Design the animatronics system
+3. Optional extras for ONNX runtimes (if you need them):
 
+   pip install -e .[cpu]    # CPU ONNX runtime
+   pip install -e .[cuda]   # GPU ONNX runtime
 
+Dependencies and extras are declared in `pyproject.toml`.
 
-## Software Architecture
-The initial goals are to develop a low-latency platform, where GLaDOS can respond to voice interactions within 600ms.
+## Download required models
+The project provides a convenience command to download required models (ASR / VAD / TTS etc.):
 
-To do this, the system constantly records data to a circular buffer, waiting for [voice to be detected](https://github.com/snakers4/silero-vad). When it's determined that the voice has stopped (including detection of normal pauses), it will be [transcribed quickly](https://github.com/huggingface/distil-whisper). This is then passed to streaming [local Large Language Model](https://github.com/ggerganov/llama.cpp), where the streamed text is broken by sentence, and passed to a [text-to-speech system](https://github.com/rhasspy/piper). This means further sentences can be generated while the current is playing, reducing latency substantially.
+    glados download
 
-### Subgoals
- - The other aim of the project is to minimize dependencies, so this can run on constrained hardware. That means no PyTorch or other large packages.
- - As I want to fully understand the system, I have removed a large amount of redirection: which means extracting and rewriting code.
+(The CLI download task reads model URLs and SHA256 checksums from `src/glados/cli.py` and writes files into the `models/` tree.)
 
-## Hardware System
-This will be based on servo- and stepper-motors. 3D printable STL will be provided to create GlaDOS's body, and she will be given a set of animations to express herself. The vision system will allow her to track and turn toward people and things of interest.
+## Run
+- Start headless assistant (blocking):
 
-# Installation Instruction
-Try this simplified process, but be aware it's still in the experimental stage!  For all operating systems, you'll first need to install Ollama to run the LLM.
+    glados start --config configs/glados_config.yaml
 
-## Install Drivers if necessary!
-If you are an Nvidia GPU, make sure you install the necessary drivers and CUDA which you can find here: [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit)
+- Start the TUI (recommended for local interaction):
 
-If you are using another accelerator (ROCm, DirectML etc.), after following the instructions below for you platform, follow up with installing the  [best onnxruntime version](https://onnxruntime.ai/docs/install/) for your system.
+    glados tui
 
- ___If you don't install the appropriate drivers, this system will still work, but the latency will be much greater!___
+- Make GLaDOS speak a short phrase from the CLI:
 
-## Set up a local LLM server:
-1. Download and install [Ollama](https://github.com/ollama/ollama) for your operating system.
-2. Once installed, download a small 3B model for testing - at a terminal or command prompt use: `ollama pull llama3.2`
+    glados say "The cake is real"
 
-Note: You can use any OpenAI or Ollama compatible server, local or cloud based. Just edit the glados_config.yaml and update the completion_url, model and the api_key if necessary.
+You can also run the CLI via `python -m glados.cli` if you don't install the package.
 
-## Operating specific instruction
-#### Windows Installation Process
-1. Open the Microsoft Store, search for `python` and install Python 3.12
+## TUI typing feature
+- While the TUI is running, press `t` to open a typing prompt.
+- Type a message and press Enter; the text will be submitted to the assistant and processed exactly like spoken input (GLaDOS will respond with both voice and text).
+- Typed input bypasses the wake-word requirement (if any in config) and is submitted immediately via `Glados.submit_text()`.
+- The `interruptible` setting in the config still applies: if `interruptible: false` and GLaDOS is speaking, new typed input will be ignored until speaking finishes.
 
-#### macOS Installation Process
-This is still experimental. Any issues can be addressed in the Discord server. If you create an issue related to this, you will be referred to the Discord server.  Note: I was getting Segfaults!  Please leave feedback!
+## Configuration (canonical keys)
+Configuration is read into the `GladosConfig` model (see `src/glados/core/engine.py`). `configs/glados_config.yaml` contains an example configuration. Important fields include:
 
-#### Linux Installation Process
-Install the PortAudio library, if you don't yet have it installed:
+- `llm_model` — identifier/name of the LLM to use
+- `completion_url` — URL for the LLM completion/streaming endpoint
+- `api_key` — optional API key for the LLM
+- `interruptible` — whether user input can interrupt speech
+- `audio_io` — audio backend name (e.g., `sounddevice`)
+- `asr_engine` — ASR engine name (e.g., `tdt`)
+- `wake_word` — optional wake word string (typing bypasses this)
+- `voice` — TTS voice identifier
+- `announcement` — optional startup announcement
 
-    sudo apt update
-    sudo apt install libportaudio2
+The full example config (in `configs/glados_config.yaml`) also contains a `personality_preprompt` list used to seed the assistant's conversation history.
 
-## Installing GLaDOS
-1. Download this repository, either:
-   1. Download and unzip this repository somewhere in your home folder, or
+## Components & architecture (high level)
+- `Glados` (src/glados/core/engine.py): orchestrator that wires ASR, TTS, LLM, audio I/O, queues and threads.
+- `SpeechListener` (src/glados/core/speech_listener.py): captures audio, runs VAD, buffers samples, and triggers ASR when speech ends.
+- `LanguageModelProcessor` (src/glados/core/llm_processor.py): sends user text (from queue) to the LLM, streams responses, splits into sentences and dispatches them to the TTS queue.
+  - The processor handles both OpenAI-style streaming ``data: `` format and plain JSON streaming (e.g., Ollama-like responses).
+- `TextToSpeechSynthesizer` (src/glados/core/tts_synthesizer.py): converts sentences into audio and places `AudioMessage` objects onto the audio queue.
+- `SpeechPlayer` (src/glados/core/speech_player.py): plays audio messages, manages interruption behavior and appends assistant messages to conversation history when an end-of-stream token is received.
+- `Audio I/O` implementations (src/glados/audio_io/): e.g., `sounddevice` backend (`sounddevice_io.py`) using `sounddevice` and a VAD model to provide sample chunks and VAD confidence.
 
-   2. At a terminal, git clone this repository using:
+Inter-thread communication uses Python `queue.Queue` instances and threading `Event` objects such as `processing_active_event`, `currently_speaking_event`, and `shutdown_event`.
 
-            git clone https://github.com/dnhkng/GLaDOS.git
+## Models
+Model files are stored under `models/ASR` and `models/TTS`. The download command in `src/glados/cli.py` lists the models it expects and verifies checksums.
 
-2. In a terminal, go to the repository folder and run these commands:
-   
-   Mac/Linux:
+## HTTP TTS API
+An API route exists in `src/glados/api/app.py`:
 
-        python scripts/install.py
-   
-   Windows:
+- POST `/v1/audio/speech` — accepts JSON `{ input, model, voice, response_format, speed }` and returns a file-like stream of generated audio.
+- A helper script `scripts/serve` starts a local server running that API (uses `litestar` under the hood).
 
-        python scripts\install.py
+## Tests & development
+- Tests use `pytest`. Install dev extras and run:
 
-   This will install Glados and download the needed AI models 
-3. To start GLaDOS, run:
+    pip install -e .[dev]
+    pytest -q
 
-        uv run glados
-    If you want something more fancy, try the Text UI (TUI), with:
+- Linting / formatting: configured with `ruff` (see `pyproject.toml`).
 
-        uv run glados tui
-        
+## Troubleshooting
+- Make sure required optional runtime packages (ONNX runtime variants) match your hardware and OS.
+- If you encounter DLL/installation issues when running ONNX models on Windows, ensure your environment has the appropriate system dependencies for your ONNX runtime distribution.
 
-    In the TUI you can press 't' to open a typing prompt so you can type messages instead of speaking. GLaDOS will still respond with voice and a printed transcript.
+## License
+See `LICENSE.txt` in the repository for license terms.
 
-## Speech Generation
-You can also get her to say something with:
+## Contributing
+Contributions are welcome: open an issue or submit a pull request with tests and a short description of the change.
 
-    uv run glados say "The cake is real"
+---
 
-## Changing the LLM Model
-
-To use other models, use the command:
-```ollama pull {modelname}```
-and then add it to glados_config.yaml as the model:
-
-    model: "{modelname}"
-
-where __{modelname}__ is a placeholder to be replaced with the model you want to use. You can find [more models here!](https://ollama.com/library)
-
-## Changing the Voice Model
-
-You can use voices from Kokoro too!
-Select a voice from the following:
- - ### Female
-  - **US**
-    - af_alloy
-    -  af_aoede
-    -  af_jessica
-    -  af_kore
-    -  af_nicole
-    -  af_nova
-    -  af_river
-    -  af_saraha
-    -  af_sky
-  - **British**
-    - bf_alice
-    - bf_emma
-    - bf_isabella
-    - bf_lily
- - ### Male
-  - **US**
-    -  am_adam
-    -  am_echo
-    -  am_eric
-    -  am_fenrir
-    -  am_liam
-    -  am_michael
-    -  am_onyx
-    -  am_puck
-  - **British**
-    - bm_daniel
-    - bm_fable
-    - bm_george
-    - bm_lewis
-
-and then add it to glados_config.yaml as the voice, e.g.:
-
-    voice: "af_bella"
-
-## OpenAI-compatible TTS server
-
-To run the OpenAI-compatible TTS server, first install dependencies using the installer script:
-
-   Mac/Linux:
-
-        python scripts/install.py --api
-
-   Windows:
-
-        python scripts\install.py --api
-
-Then run the server with:
-
-    ./scripts/serve
-
-Alternatively, you can run the server in Docker:
-
-    docker compose up -d --build
-
-You can generate voice like this:
-
-    curl -X POST http://localhost:5050/v1/audio/speech \
-    -H "Content-Type: application/json" \
-    -d '{
-        "input": "Hello world! This is a test.",
-        "voice": "glados"
-    }' \
-    --output speech.mp3
-
-NOTE: The server will not automatically reload on changes when running with Docker. When actively developing, it is recommended to run the server locally using the `serve` script.
-
-The server will be available at [http://localhost:5050](http://localhost:5050)
-
-## More Personalities or LLM's
-Make a copy of the file 'configs/glados_config.yaml' and give it a new name, then edit the parameters:
-
-    model:  # the LLM model you want to use, see "Changing the LLM Model"
-    personality_preprompt:
-    system:  # A description of who the character should be
-        - user:  # An example of a question you might ask
-        - assistant:  # An example of how the AI should respond
-  
-To use these new settings, use the command:
-
-    uv run glados start --config configs/assistant_config.yaml
-
-## Common Issues
-1. If you find you are getting stuck in loops, as GLaDOS is hearing herself speak, you have two options:
-   1. Solve this by upgrading your hardware. You need to you either headphone, so she can't physically hear herself speak, or a conference-style room microphone/speaker. These have hardware sound cancellation, and prevent these loops.
-   2. Disable voice interruption. This means neither you nor GLaDOS can interrupt when GLaDOS is speaking. To accomplish this, edit the `glados_config.yaml`, and change `interruptible:` to  `false`.
-2. If you get the following error:
-
-    `ImportError: DLL load failed while importing onnxruntime_pybind11_state`
-   
-   you can fix it by installing the latest [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170).
-
-
-## Testing the submodules
-Want to mess around with the AI models? You can test the systems by exploring the 'demo.ipynb'.
+If you'd like, I can also add a short CONTRIBUTING.md and a developer quickstart script to the repository.
