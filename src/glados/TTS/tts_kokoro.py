@@ -50,7 +50,7 @@ class SpeechSynthesizer:
     MAX_PHONEME_LENGTH: int = 510
     SAMPLE_RATE: int = 24000
 
-    def __init__(self, model_path: Path = MODEL_PATH, voice: str = DEFAULT_VOICE) -> None:
+    def __init__(self, model_path: Path = MODEL_PATH, voice: str = DEFAULT_VOICE, language: str = "en_us") -> None:
         self.sample_rate = self.SAMPLE_RATE
         self.voices: dict[str, NDArray[np.float32]] = np.load(VOICES_PATH)
         self.vocab = self._get_vocab()
@@ -69,6 +69,7 @@ class SpeechSynthesizer:
             providers=providers,
         )
         self.phonemizer = Phonemizer()
+        self.language = language
 
     def set_voice(self, voice: str) -> None:
         """
@@ -94,7 +95,7 @@ class SpeechSynthesizer:
         Returns:
             NDArray[np.float32]: An array of audio samples representing the synthesized speech
         """
-        phonemes = self.phonemizer.convert_to_phonemes([text], "en_us")
+        phonemes = self.phonemizer.convert_to_phonemes([text], self.language)
         phoneme_ids = self._phonemes_to_ids(phonemes[0])
         audio = self._synthesize_ids_to_audio(phoneme_ids)
         return np.array(audio, dtype=np.float32)

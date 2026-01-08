@@ -25,6 +25,12 @@ class SpeechSynthesizerProtocol(Protocol):
 # Factory function
 def get_speech_synthesizer(
     voice: str = "glados",
+    *,
+    language: str = "en_us",
+    model_path: str | None = None,
+    phoneme_path: str | None = None,
+    token_to_idx_path: str | None = None,
+    idx_to_token_path: str | None = None,
 ) -> SpeechSynthesizerProtocol:  # Return type is now a Union of concrete types
     """
     Factory function to get an instance of an audio synthesizer based on the specified voice type.
@@ -40,7 +46,17 @@ def get_speech_synthesizer(
     if voice.lower() == "glados":
         from ..TTS import tts_glados
 
-        return tts_glados.SpeechSynthesizer()
+        params: dict[str, object] = {"language": language}
+        if model_path is not None:
+            params["model_path"] = model_path
+        if phoneme_path is not None:
+            params["phoneme_path"] = phoneme_path
+        if token_to_idx_path is not None:
+            params["token_to_idx_path"] = token_to_idx_path
+        if idx_to_token_path is not None:
+            params["idx_to_token_path"] = idx_to_token_path
+
+        return tts_glados.SpeechSynthesizer(**params)
 
     from ..TTS import tts_kokoro
 
@@ -48,7 +64,9 @@ def get_speech_synthesizer(
     if voice not in available_voices:
         raise ValueError(f"Voice '{voice}' not available. Available voices: {available_voices}")
 
-    return tts_kokoro.SpeechSynthesizer(voice=voice)
+    if model_path is not None:
+        return tts_kokoro.SpeechSynthesizer(model_path=model_path, voice=voice, language=language)
+    return tts_kokoro.SpeechSynthesizer(voice=voice, language=language)
 
 
 __all__ = ["SpeechSynthesizerProtocol", "get_speech_synthesizer"]

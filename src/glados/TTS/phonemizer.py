@@ -163,12 +163,27 @@ class Phonemizer:
         if config is None:
             config = ModelConfig()
         self.config = config
-        self.phoneme_dict: dict[str, str] = self._load_pickle(self.config.PHONEME_DICT_PATH)
 
-        self.phoneme_dict["glados"] = "ɡlˈɑːdɑːs"  # Add GLaDOS to the phoneme dictionary!
+        # Attempt to load phoneme resources, but fall back gracefully if files are
+        # missing to allow operation in environments that don't have a full
+        # phonemizer model for the requested language.
+        try:
+            self.phoneme_dict: dict[str, str] = self._load_pickle(self.config.PHONEME_DICT_PATH)
+        except Exception:
+            self.phoneme_dict = {}
+            # Log at debug level; higher-level code can notify the user if needed
+        # Add GLaDOS entry for fun
+        self.phoneme_dict["glados"] = "ɡlˈɑːdɑːs"
 
-        self.token_to_idx = self._load_pickle(self.config.TOKEN_TO_IDX_PATH)
-        self.idx_to_token = self._load_pickle(self.config.IDX_TO_TOKEN_PATH)
+        try:
+            self.token_to_idx = self._load_pickle(self.config.TOKEN_TO_IDX_PATH)
+        except Exception:
+            self.token_to_idx = {}
+
+        try:
+            self.idx_to_token = self._load_pickle(self.config.IDX_TO_TOKEN_PATH)
+        except Exception:
+            self.idx_to_token = {}
 
         providers = ort.get_available_providers()
         if "TensorrtExecutionProvider" in providers:
@@ -176,17 +191,34 @@ class Phonemizer:
         if "CoreMLExecutionProvider" in providers:
             providers.remove("CoreMLExecutionProvider")
 
-        self.ort_session = ort.InferenceSession(
-            self.config.MODEL_PATH,
-            sess_options=ort.SessionOptions(),
-            providers=providers,
-        )
+        # Try to create an ONNX session for the phonemizer model; if this fails,
+        # set a flag and continue so we can use a fallback mechanism.
+        try:
+            self.ort_session = ort.InferenceSession(
+                self.config.MODEL_PATH,
+                sess_options=ort.SessionOptions(),
+                providers=providers,
+            )
+            self._onnx_available = True
+        except Exception:
+            self.ort_session = None  # type: ignore[assignment]
+            self._onnx_available = False
 
         self.special_tokens: set[str] = {
             SpecialTokens.PAD.value,
             SpecialTokens.END.value,
             SpecialTokens.EN_US.value,
         }
+
+        # If ONNX phonemizer isn't available, we'll attempt to use 'espeak'/'espeak-ng'
+        # (if installed on the system) as a practical offline fallback.
+        import shutil
+
+        self._espeak_cmd: str | None = None
+        for cmd in ("espeak-ng", "espeak"):
+            if shutil.which(cmd):
+                self._espeak_cmd = cmd
+                break
 
     @staticmethod
     def _load_pickle(path: Path) -> dict[str, Any]:
@@ -562,17 +594,28 @@ class Phonemizer:
         ]
 
         if words_to_predict:
-            input_batch = [self.encode(word) for word in words_to_predict]
-            input_batch_padded: NDArray[np.int64] = self.pad_sequence_fixed(input_batch, self.config.MODEL_INPUT_LENGTH)
+            if self._onnx_available:
+                input_batch = [self.encode(word) for word in words_to_predict]
+                input_batch_padded: NDArray[np.int64] = self.pad_sequence_fixed(
+                    input_batch, self.config.MODEL_INPUT_LENGTH
+                )
 
-            ort_inputs = {self.ort_session.get_inputs()[0].name: input_batch_padded}
-            ort_outs = self.ort_session.run(None, ort_inputs)
+                ort_inputs = {self.ort_session.get_inputs()[0].name: input_batch_padded}
+                ort_outs = self.ort_session.run(None, ort_inputs)
 
-            ids = self._process_model_output(ort_outs)
+                ids = self._process_model_output(ort_outs)
 
-            # Step 5: Add predictions to the dictionary
-            for id, word in zip(ids, words_to_predict, strict=False):
-                word_phonemes[word] = self.decode(id)
+                # Step 5: Add predictions to the dictionary
+                for id, word in zip(ids, words_to_predict, strict=False):
+                    word_phonemes[word] = self.decode(id)
+            else:
+                # ONNX phonemizer not available: use espeak (if present) per-word as a fallback
+                for word in words_to_predict:
+                    if self._espeak_cmd:
+                        word_phonemes[word] = self._espeak_phoneme_for_text(word, lang)
+                    else:
+                        # Last-resort fallback: return the raw word so synthesis can still attempt
+                        word_phonemes[word] = word
 
         # Step 6: Get phonemes for each word in the text
         phoneme_lists = []
@@ -583,6 +626,29 @@ class Phonemizer:
             phoneme_lists.append(text_phons)
 
         return ["".join(phoneme_list) for phoneme_list in phoneme_lists]
+
+    def _espeak_phoneme_for_text(self, text: str, lang: str) -> str:
+        """
+        Use espeak or espeak-ng (if installed) to produce a phonetic transcription for the given text.
+
+        This is a pragmatic offline fallback when an ONNX phonemizer model is not available.
+
+        Returns:
+            str: A phonetic string returned by espeak, or the original text on failure.
+        """
+        import subprocess
+        import shlex
+
+        if not self._espeak_cmd:
+            return text
+
+        cmd = [self._espeak_cmd, "-v", lang, "-q", "-x", text]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            out = proc.stdout.strip()
+            return out if out else text
+        except Exception:
+            return text
 
     def __del__(self) -> None:
         """Clean up ONNX session to prevent context leaks."""

@@ -276,6 +276,10 @@ class AudioTranscriber:
             ValueError: If the configuration is invalid (YAML format, content validation).
             RuntimeError: If ONNX models fail to load.
         """
+        # Accept None for config_path as a signal to use the default
+        if config_path is None:
+            config_path = self.DEFAULT_CONFIG_PATH
+
         # 1. Load the main YAML configuration file
         self.config: dict[str, typing.Any]
         if not config_path.exists():

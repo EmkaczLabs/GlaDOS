@@ -11,6 +11,7 @@ import sounddevice as sd  # type: ignore
 
 from .core.engine import Glados, GladosConfig
 from .TTS import tts_glados
+from .TTS import get_speech_synthesizer
 from .utils import spoken_text_converter as stc
 from .utils.resources import resource_path
 
@@ -178,8 +179,10 @@ def say(text: str, config_path: str | Path = "glados_config.yaml") -> None:
     Example:
         say("Hello, world!")  # Speaks the text using GLaDOS voice
     """
-    glados_tts = tts_glados.SpeechSynthesizer()
-    converter = stc.SpokenTextConverter()
+    # Respect configured language when generating speech
+    glados_config = GladosConfig.from_yaml(str(config_path))
+    glados_tts = get_speech_synthesizer(glados_config.voice, language=glados_config.language)
+    converter = stc.SpokenTextConverter(language=glados_config.language)
     converted_text = converter.text_to_spoken(text)
     # Generate the audio to from the text
     audio = glados_tts.generate_speech_audio(converted_text)

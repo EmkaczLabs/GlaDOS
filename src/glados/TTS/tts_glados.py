@@ -122,7 +122,13 @@ class SpeechSynthesizer:
     EOS = "$"  # end of sentence
 
     def __init__(
-        self, model_path: Path = MODEL_PATH, phoneme_path: Path = PHONEME_TO_ID_PATH, speaker_id: int | None = None
+        self,
+        model_path: Path = MODEL_PATH,
+        phoneme_path: Path = PHONEME_TO_ID_PATH,
+        speaker_id: int | None = None,
+        language: str = "en_us",
+        token_to_idx_path: Path | None = None,
+        idx_to_token_path: Path | None = None,
     ) -> None:
         """
         Initialize the text-to-speech synthesizer with a specified model and optional speaker configuration.
@@ -131,6 +137,9 @@ class SpeechSynthesizer:
             model_path (Path): Path to the ONNX model file. Defaults to MODEL_PATH.
             phoneme_path (Path): Path to the phoneme-to-ID mapping file. Defaults to PHONEME_TO_ID_PATH.
             speaker_id (int | None): Optional speaker ID for multi-speaker models. Defaults to None.
+            language (str): Language code for phonemization (default: "en_us").
+            token_to_idx_path (Path | None): Optional path to custom token-to-ID mapping file.
+            idx_to_token_path (Path | None): Optional path to custom ID-to-token mapping file.
         """
         providers = ort.get_available_providers()
         if "TensorrtExecutionProvider" in providers:
@@ -138,13 +147,50 @@ class SpeechSynthesizer:
         if "CoreMLExecutionProvider" in providers:
             providers.remove("CoreMLExecutionProvider")
 
-        self.ort_sess = ort.InferenceSession(
-            model_path,
-            sess_options=ort.SessionOptions(),
-            providers=providers,
-        )
-        self.phonemizer = Phonemizer()
-        self.id_map = self._load_pickle(phoneme_path)
+        # Coerce string paths to Path and fall back to defaults when None
+        if not model_path:
+            model_path = self.MODEL_PATH
+        else:
+            from pathlib import Path as _Path
+
+            model_path = _Path(model_path)
+
+        if not phoneme_path:
+            phoneme_path = self.PHONEME_TO_ID_PATH
+        else:
+            from pathlib import Path as _Path
+
+            phoneme_path = _Path(phoneme_path)
+
+        try:
+            self.ort_sess = ort.InferenceSession(
+                model_path,
+                sess_options=ort.SessionOptions(),
+                providers=providers,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to load TTS model from {model_path}: {e}") from e
+
+        # Build a phonemizer configuration for the requested language if paths are provided.
+        try:
+            from .phonemizer import ModelConfig
+
+            model_cfg = ModelConfig(
+                model_path=None,  # Leave as default for phonemizer model unless overridden
+                phoneme_dict_path=None,
+                token_to_idx_path=token_to_idx_path,
+                idx_to_token_path=idx_to_token_path,
+            )
+        except Exception:
+            model_cfg = None
+
+        # Create a phonemizer instance. If custom files were provided, Phonemizer will try to use them.
+        self.phonemizer = Phonemizer(config=model_cfg)
+        # Load phoneme ID mapping (fallback to default file if necessary)
+        try:
+            self.id_map = self._load_pickle(phoneme_path)
+        except Exception:
+            self.id_map = {}
 
         try:
             # Load the configuration file
@@ -166,6 +212,9 @@ class SpeechSynthesizer:
             if self.config.num_speakers > 1 and self.config.speaker_id_map is not None
             else None
         )
+        # Expose language on the instance for use by the phonemizer call
+        self.lang = language
+        self.language = language
 
     @staticmethod
     def _load_pickle(path: Path) -> dict[str, Any]:
@@ -225,7 +274,7 @@ class SpeechSynthesizer:
             phonemes = synthesizer._phonemizer("Hello world")
             # Might return something like ['hh', 'AH0', 'l', 'oW1', 'r', 'AO1', 'l', 'd']
         """
-        phonemes = self.phonemizer.convert_to_phonemes([input_text], "en_us")
+        phonemes = self.phonemizer.convert_to_phonemes([input_text], self.lang)
 
         return phonemes
 

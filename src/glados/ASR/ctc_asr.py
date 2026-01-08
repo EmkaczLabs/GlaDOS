@@ -41,6 +41,10 @@ class AudioTranscriber:
             - Removes TensorRT execution provider to ensure compatibility across different hardware
             - Uses default model and token paths if not explicitly specified
         """
+        # Ensure we have a valid Path to the config file (allow None to mean default)
+        if config_path is None:
+            config_path = DEFAULT_CONFIG_PATH
+
         # 1. Load the main YAML configuration file
         self.config: dict[str, typing.Any]
         if not config_path.exists():

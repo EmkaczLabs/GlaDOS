@@ -36,11 +36,24 @@ def get_audio_transcriber(
     if engine_type.lower() == "ctc":
         from .ctc_asr import AudioTranscriber as CTCTranscriber
 
-        return CTCTranscriber()
+        # Allow overriding model/config paths and other engine-specific kwargs
+        params: dict[str, object] = {}
+        model_path = kwargs.get("model_path")
+        config_path = kwargs.get("config_path")
+        if model_path is not None:
+            params["model_path"] = model_path
+        if config_path is not None:
+            params["config_path"] = config_path
+
+        return CTCTranscriber(**params)
     elif engine_type.lower() == "tdt":
         from .tdt_asr import AudioTranscriber as TDTTranscriber
 
-        return TDTTranscriber()
+        params = {}
+        config_path = kwargs.get("config_path")
+        if config_path is not None:
+            params["config_path"] = config_path
+        return TDTTranscriber(**params)
     else:
         raise ValueError(f"Unsupported ASR engine type: {engine_type}")
 

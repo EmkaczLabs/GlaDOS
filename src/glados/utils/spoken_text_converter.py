@@ -45,7 +45,7 @@ class SpokenTextConverter:
         "ain't": "is not",
     }
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = "en") -> None:
         # Initialize any necessary state or configurations here, maybe for other languages?
 
         # Precompile quick check pattern
@@ -75,6 +75,17 @@ class SpokenTextConverter:
             |\.{3,}|\. \. \.         # Triple dots (including spaced version)
             """
         )
+
+        # Language code (e.g., 'en', 'pl', 'en_us')
+        self.language = language
+
+        # Try to import num2words for localized number-to-words conversion
+        try:
+            from num2words import num2words  # type: ignore
+
+            self._num2words = num2words
+        except Exception:
+            self._num2words = None
 
         # TODO: Add compiled regex patterns for other conversions
 
@@ -116,6 +127,14 @@ class SpokenTextConverter:
                     num = float(num)
 
             # Special handling for integers
+            # Use localized num2words for integer conversion when available and language != English
+            if self._num2words and isinstance(num, int) and not self.language.startswith("en"):
+                try:
+                    return self._num2words(num, lang=self.language.split("_")[0])
+                except Exception:
+                    # Fall back to default implementation on failure
+                    pass
+
             if isinstance(num, int) or (isinstance(num, float) and num.is_integer()):
                 num = int(num)  # Convert to int if it's a whole number
 

@@ -79,6 +79,18 @@ class GladosConfig(BaseModel):
     announcement: str | None
     personality_preprompt: list[PersonalityPrompt]
 
+    # Language code, such as 'en_us' or 'pl'
+    language: str = "en_us"
+
+    # Optional overrides for model and resource paths. These are useful for
+    # providing language-specific models (e.g., Polish ASR/TTS models) when present.
+    asr_model_path: str | None = None
+    asr_config_path: str | None = None
+    tts_model_path: str | None = None
+    phoneme_path: str | None = None
+    token_to_idx_path: str | None = None
+    idx_to_token_path: str | None = None
+
     @classmethod
     def from_yaml(cls, path: str | Path, key_to_config: tuple[str, ...] = ("Glados",)) -> "GladosConfig":
         """
@@ -149,6 +161,7 @@ class Glados:
         wake_word: str | None = None,
         announcement: str | None = None,
         personality_preprompt: tuple[dict[str, str], ...] = DEFAULT_PERSONALITY_PREPROMPT,
+        language: str = "en_us",
     ) -> None:
         """
         Initialize the Glados voice assistant with configuration parameters.
@@ -169,6 +182,7 @@ class Glados:
             wake_word (str | None): Optional wake word to trigger the assistant.
             announcement (str | None): Optional announcement to play on startup.
             personality_preprompt (tuple[dict[str, str], ...]): Initial personality preprompt messages.
+            language (str): Language code, such as 'en_us' or 'pl'.
         """
         self._asr_model = asr_model
         self._tts = tts_model
@@ -181,7 +195,8 @@ class Glados:
         self._messages: list[dict[str, str]] = list(personality_preprompt)
 
         # Initialize spoken text converter, that converts text to spoken text. eg. 12 -> "twelve"
-        self._stc = stc.SpokenTextConverter()
+        self.language = language
+        self._stc = stc.SpokenTextConverter(language=language)
 
         # warm up onnx ASR model, this is needed to avoid long pauses on first request
         self._asr_model.transcribe_file(resource_path("data/0.wav"))
@@ -337,12 +352,32 @@ class Glados:
             Glados: A new Glados instance configured with the provided settings
         """
 
+        # Provide language- and model-aware instantiation. If the config provides
+        # explicit model paths for ASR or TTS, pass them through; otherwise fall
+        # back to defaults for the engines.
+        asr_kw: dict = {}
+        if config.asr_model_path:
+            asr_kw["model_path"] = config.asr_model_path
+        if config.asr_config_path:
+            asr_kw["config_path"] = config.asr_config_path
+        asr_kw["language"] = config.language
+
         asr_model = get_audio_transcriber(
             engine_type=config.asr_engine,
+            **asr_kw,
         )
 
-        tts_model: SpeechSynthesizerProtocol
-        tts_model = get_speech_synthesizer(config.voice)
+        tts_kw: dict = {"language": config.language}
+        if config.tts_model_path:
+            tts_kw["model_path"] = config.tts_model_path
+        if config.phoneme_path:
+            tts_kw["phoneme_path"] = config.phoneme_path
+        if config.token_to_idx_path:
+            tts_kw["token_to_idx_path"] = config.token_to_idx_path
+        if config.idx_to_token_path:
+            tts_kw["idx_to_token_path"] = config.idx_to_token_path
+
+        tts_model: SpeechSynthesizerProtocol = get_speech_synthesizer(config.voice, **tts_kw)
 
         audio_io = get_audio_system(backend_type=config.audio_io)
 
@@ -357,6 +392,7 @@ class Glados:
             wake_word=config.wake_word,
             announcement=config.announcement,
             personality_preprompt=tuple(config.to_chat_messages()),
+            language=config.language,
         )
 
     @classmethod
